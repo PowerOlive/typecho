@@ -416,10 +416,10 @@ class HyperDown
 
         // link
         $text = preg_replace_callback(
-            "/<(https?:\/\/.+)>/i",
+            "/<(https?:\/\/.+|(?:mailto:)?[_a-z0-9-\.\+]+@[_\w-]+\.[a-z]{2,})>/i",
             function ($matches) use ($self) {
                 $url = $self->cleanUrl($matches[1]);
-                $link = $self->call('parseLink', $matches[1]);
+                $link = $self->call('parseLink', $url);
 
                 return $self->makeHolder(
                     "<a href=\"{$url}\">{$link}</a>"
@@ -475,9 +475,11 @@ class HyperDown
             function ($matches) use ($self) {
                 $escaped = htmlspecialchars($self->escapeBracket($matches[1]));
                 $url = $self->escapeBracket($matches[2]);
-                $url = $self->cleanUrl($url);
+                list ($url, $title) = $self->cleanUrl($url, true);
+                $title = empty($title)? $escaped : " title=\"{$title}\"";
+
                 return $self->makeHolder(
-                    "<img src=\"{$url}\" alt=\"{$escaped}\" title=\"{$escaped}\">"
+                    "<img src=\"{$url}\" alt=\"{$title}\" title=\"{$title}\">"
                 );
             },
             $text
@@ -505,8 +507,10 @@ class HyperDown
                     $self->escapeBracket($matches[1]),  '',  false, false
                 );
                 $url = $self->escapeBracket($matches[2]);
-                $url = $self->cleanUrl($url);
-                return $self->makeHolder("<a href=\"{$url}\">{$escaped}</a>");
+                list ($url, $title) = $self->cleanUrl($url, true);
+                $title = empty($title) ? '' : " title=\"{$title}\"";
+
+                return $self->makeHolder("<a href=\"{$url}\"{$title}>{$escaped}</a>");
             },
             $text
         );
@@ -537,10 +541,11 @@ class HyperDown
         // autolink url
         if ($enableAutoLink) {
             $text = preg_replace_callback(
-                "/(^|[^\"])(https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&\/=]*))($|[^\"])/",
+                "/(^|[^\"])(https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&\/=]*)|(?:mailto:)?[_a-z0-9-\.\+]+@[_\w-]+\.[a-z]{2,})($|[^\"])/",
                 function ($matches) use ($self) {
-                    $link = $self->call('parseLink', $matches[2]);
-                    return "{$matches[1]}<a href=\"{$matches[2]}\">{$link}</a>{$matches[5]}";
+                    $url = $self->cleanUrl($matches[2]);
+                    $link = $self->call('parseLink', $url);
+                    return "{$matches[1]}<a href=\"{$url}\">{$link}</a>{$matches[5]}";
                 },
                 $text
             );
@@ -694,6 +699,7 @@ class HyperDown
         if ($this->isBlock('list') && !preg_match("/^\s*\[((?:[^\]]|\\]|\\[)+?)\]:\s*(.+)$/", $line)) {
             if (preg_match("/^(\s*)(~{3,}|`{3,})([^`~]*)$/i", $line)) {
                 // ignore code
+                $state['empty'] = 0;
                 return true;
             } elseif ($state['empty'] <= 1
                 && preg_match("/^(\s*)\S+/", $line, $matches)
@@ -1623,17 +1629,37 @@ class HyperDown
 
     /**
      * @param $url
-     * @return string
+     * @param bool $parseTitle
+     *
+     * @return mixed
      */
-    public function cleanUrl($url)
+    public function cleanUrl($url, $parseTitle = false)
     {
-        if (preg_match("/^\s*(https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&\/=]*))/", $url, $matches)) {
-            return $matches[1];
-        } elseif (preg_match("/^\s*([-a-zA-Z0-9()@:%_\+.~#?&\/=]+)/", $url, $matches)) {
-            return $matches[1];
-        } else {
+        $title = null;
+        $url = trim($url);
+
+        if ($parseTitle) {
+            $pos = strpos($url, ' ');
+
+            if ($pos !== false) {
+                $title = htmlspecialchars(trim(substr($url, $pos + 1), ' "\''));
+                $url = substr($url, 0, $pos);
+            }
+        }
+
+        $url = preg_replace("/[\"'<>\s]/", '', $url);
+
+        if (preg_match("/^(mailto:)?[_a-z0-9-\.\+]+@[_\w-]+\.[a-z]{2,}$/i", $url, $matches)) {
+            if (empty($matches[1])) {
+                $url = 'mailto:' . $url;
+            }
+        }
+
+        if (preg_match("/^\w+:/i", $url) && !preg_match("/^(https?|mailto):/i", $url)) {
             return '#';
         }
+
+        return $parseTitle ? [$url, $title] : $url;
     }
 
     /**
